@@ -5,6 +5,12 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      plattform:
+        description: 'Was bauen?'
+        type: choice
+        options: [alle, desktop, ios]
+        default: alle
 
 permissions:
   contents: write
@@ -12,6 +18,7 @@ permissions:
 jobs:
   desktop:
     name: ${{ matrix.name }}
+    if: github.event_name != 'workflow_dispatch' || inputs.plattform != 'ios'
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +59,7 @@ jobs:
 
   ios:
     name: iPad/iPhone (TestFlight)
+    if: github.event_name != 'workflow_dispatch' || inputs.plattform != 'desktop'
     runs-on: macos-latest
     env:
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
