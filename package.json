@@ -1,0 +1,12 @@
+{
+  "name": "pdf-stift",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "prepare-dist": "sh build.sh && rm -rf dist && mkdir -p dist && cp -r index.html icon.svg manifest.webmanifest lib dist/",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

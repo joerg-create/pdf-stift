@@ -1,0 +1,104 @@
+name: Apps bauen
+
+# Startet bei einem Versions-Tag (z. B. v1.0.1) oder von Hand unter „Actions“.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            args: ''
+          - name: macOS
+            os: macos-latest
+            args: '--target universal-apple-darwin'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run prepare-dist
+        shell: bash
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: PDF Stift v__VERSION__
+          releaseBody: |
+            **Windows:** `PDF.Stift_..._x64-setup.exe` herunterladen und ausführen.
+            **Mac:** `PDF.Stift_..._universal.dmg` herunterladen, öffnen, App in „Programme“ ziehen.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  ios:
+    name: iPad/iPhone (TestFlight)
+    runs-on: macos-latest
+    env:
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Apple-Zugang vorhanden?
+        id: check
+        run: |
+          if [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_DEVELOPMENT_TEAM" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "Apple-Secrets fehlen, iOS wird übersprungen."; fi
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ok == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.ok == 'true'
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.check.outputs.ok == 'true'
+        with:
+          targets: aarch64-apple-ios
+      - uses: swatinem/rust-cache@v2
+        if: steps.check.outputs.ok == 'true'
+        with:
+          workspaces: src-tauri
+      - name: Vorbereiten
+        if: steps.check.outputs.ok == 'true'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          npm ci
+          npm run prepare-dist
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s\n' "$APPLE_API_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY}.p8
+          echo "APPLE_API_KEY_PATH=$HOME/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
+          npx tauri ios init --ci
+      - name: Bauen
+        if: steps.check.outputs.ok == 'true'
+        run: npx tauri ios build --ci --export-method app-store-connect --build-number ${{ github.run_number }}
+      - name: Zu TestFlight hochladen
+        if: steps.check.outputs.ok == 'true'
+        run: |
+          IPA=$(find src-tauri/gen/apple/build -name '*.ipa' | head -1)
+          echo "IPA: $IPA"
+          xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.ok == 'true'
+        with:
+          name: ios-ipa
+          path: src-tauri/gen/apple/build/**/*.ipa
+          if-no-files-found: ignore
