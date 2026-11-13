@@ -1,0 +1,11 @@
+{
+  "name": "PDF Stift",
+  "short_name": "PDF Stift",
+  "description": "PDF öffnen, zeichnen, Linien begradigen, Text einfügen und speichern.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#e7e9ee",
+  "theme_color": "#1f4fd1",
+  "lang": "de",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
