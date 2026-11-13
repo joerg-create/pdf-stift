@@ -102,6 +102,13 @@ jobs:
           printf '%s\n' "$APPLE_API_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY}.p8
           echo "APPLE_API_KEY_PATH=$HOME/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
           npx tauri ios init --ci
+      - name: Zertifikat und Profil für diesen Lauf anlegen
+        if: steps.check.outputs.ok == 'true'
+        env:
+          BUNDLE_ID: de.pdfstift.app
+        run: |
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography
+          python3 .github/scripts/asc_signing.py create
       - name: Bauen
         if: steps.check.outputs.ok == 'true'
         run: npx tauri ios build --ci --export-method app-store-connect --build-number ${{ github.run_number }}
@@ -111,9 +118,6 @@ jobs:
           IPA=$(find src-tauri/gen/apple/build -name '*.ipa' | head -1)
           echo "IPA: $IPA"
           xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
-      - uses: actions/upload-artifact@v4
-        if: steps.check.outputs.ok == 'true'
-        with:
-          name: ios-ipa
-          path: src-tauri/gen/apple/build/**/*.ipa
-          if-no-files-found: ignore
+      - name: Zertifikat und Profil wieder entfernen
+        if: always() && steps.check.outputs.ok == 'true'
+        run: python3 .github/scripts/asc_signing.py cleanup
