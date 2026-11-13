@@ -80,6 +80,15 @@ main {
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   display: flex; flex-direction: column; align-items: center; gap: 20px;
 }
+.tabs { flex-basis: 100%; display: flex; gap: 4px; align-items: stretch; overflow-x: auto; scrollbar-width: thin; margin-bottom: 2px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.tab { flex: none; max-width: 220px; min-height: 34px; padding: 0 4px 0 12px; border: 1px solid var(--line); background: var(--desk); border-radius: 8px; gap: 4px; }
+.tab[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); font-weight: 600; }
+.tab .tname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab .dirty { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.tab .tclose { width: 26px; height: 26px; min-height: 0; padding: 0; justify-content: center; border-radius: 6px; font-size: 16px; color: var(--muted); }
+.tab .tclose.confirm { width: auto; padding: 0 8px; background: #d62828; color: #fff; font-size: 12px; }
+.tabadd { flex: none; min-height: 34px; padding: 0 12px; border: 1px dashed var(--line); font-size: 18px; }
+#pages > .doc { display: flex; flex-direction: column; align-items: center; gap: 20px; }
 .pages { display: flex; flex-direction: column; align-items: center; gap: 20px; max-width: 100%; overflow-x: auto; }
 .page { position: relative; background: #fff; box-shadow: var(--paper-shadow); flex: none; }
 .page canvas { position: absolute; inset: 0; display: block; }
@@ -108,12 +117,13 @@ body.tool-eraser .page .ink { cursor: cell; }
 </style>
 
 <header class="bar" id="bar">
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Offene PDFs"></nav>
   <div class="group">
     <label class="btn outline" for="file" title="PDF öffnen">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
       <span>Öffnen</span>
     </label>
-    <input type="file" id="file" accept="application/pdf,.pdf" hidden>
+    <input type="file" id="file" accept="application/pdf,.pdf" multiple hidden>
   </div>
   <span class="sep"></span>
   <div class="group" role="toolbar" aria-label="Werkzeuge">
@@ -158,7 +168,9 @@ body.tool-eraser .page .ink { cursor: cell; }
     <button id="zin" title="Vergrößern">+</button>
   </div>
   <span class="spacer"></span>
-  <button id="save" class="primary" title="Bearbeitetes PDF speichern">
+  <button id="saveas" class="outline" title="Als neue Datei speichern" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span class="lbl">Speichern unter</span></button>
+  <button id="save" class="primary" title="Bearbeitetes PDF speichern (Strg/Cmd+S)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span>Speichern</span></button>
 </header>
 
@@ -255,6 +267,7 @@ function updateButtons() {
   $('#redo').disabled = !state.redo.length;
   $('#straighten').disabled = !lastStroke();
   $('#save').disabled = !state.doc;
+  if (cur) { const dirtyNow = isDirty(cur); if (dirtyNow !== cur.lastDirty) { cur.lastDirty = dirtyNow; renderTabs(); } }
 }
 function lastStroke() {
   for (let i = state.annots.length - 1; i >= 0; i--)
@@ -302,12 +315,13 @@ function redraw(i, extra) {
 }
 
 /* ---------- PDF laden und darstellen ---------- */
-async function openBytes(bytes, name) {
+async function openBytes(bytes, name, handle) {
   try {
     const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
-    state.bytes = bytes; state.name = name || 'dokument.pdf'; state.doc = doc;
-    state.annots = []; state.undo = []; state.redo = []; state.pages = [];
-    pagesEl.textContent = '';
+    const d = { bytes, name: name || 'dokument.pdf', doc, annots: [], undo: [], redo: [], pages: [], scale: 1, fitScale: 1,
+                el: document.createElement('div'), handle: handle || null, savedLen: 0, rendered: false, scrollY: 0 };
+    d.el.className = 'doc'; pagesEl.append(d.el);
+    docs.push(d); activate(d, true);
     for (let n = 1; n <= doc.numPages; n++) {
       const pdfPage = await doc.getPage(n);
       const vp1 = pdfPage.getViewport({ scale: 1 });
@@ -315,12 +329,13 @@ async function openBytes(bytes, name) {
       const base = document.createElement('canvas'), ink = document.createElement('canvas');
       ink.className = 'ink'; ink.dataset.page = n - 1;
       const no = document.createElement('span'); no.className = 'pageno'; no.textContent = `Seite ${n} / ${doc.numPages}`;
-      wrap.append(base, ink, no); pagesEl.append(wrap);
+      wrap.append(base, ink, no); d.el.append(wrap);
       state.pages.push({ pdfPage, vp1, wrap, base, ink, renderedAt: 0 });
       bindInk(ink, n - 1);
     }
-    fitWidth(); await renderAll();
-    $('#hint').hidden = true; updateButtons();
+    fitWidth(); $('#hint').hidden = true; updateButtons();
+    await renderAll();
+    return d;
   } catch (e) {
     console.error(e);
     toast('Diese Datei ließ sich nicht als PDF öffnen. Ist sie beschädigt oder passwortgeschützt?', 5000);
@@ -333,7 +348,8 @@ function fitWidth() {
 }
 let renderToken = 0;
 async function renderAll() {
-  const token = ++renderToken;
+  const token = ++renderToken, d = cur; if (!d) return;
+  d.rendered = false;
   $('#zval').textContent = Math.round(state.scale / state.fitScale * 100) + '%';
   for (const pg of state.pages) {   // Größe sofort setzen, damit das Layout steht
     const w = pg.vp1.width * state.scale, h = pg.vp1.height * state.scale;
@@ -350,6 +366,62 @@ async function renderAll() {
     try { await pg.pdfPage.render({ canvasContext: pg.base.getContext('2d'), viewport: vp }).promise; }
     catch (e) { if (e && e.name !== 'RenderingCancelledException') console.error(e); }
   }
+  if (token === renderToken) d.rendered = true;
+}
+
+/* ---------- Tabs ---------- */
+const DOC_KEYS = ['bytes', 'name', 'doc', 'pages', 'annots', 'undo', 'redo', 'scale', 'fitScale'];
+const docs = []; let cur = null;
+function activate(d, fresh) {
+  if (editor) editor.finish();
+  if (cur) { DOC_KEYS.forEach(k => (cur[k] = state[k])); cur.scrollY = document.scrollingElement.scrollTop; }
+  cur = d;
+  DOC_KEYS.forEach(k => (state[k] = d ? d[k] : (k === 'scale' || k === 'fitScale' ? 1 : k === 'name' ? '' : k === 'doc' || k === 'bytes' ? null : [])));
+  if (fresh) DOC_KEYS.forEach(k => (state[k] = d[k]));
+  docs.forEach(x => (x.el.hidden = x !== d));
+  renderTabs(); updateButtons();
+  if (!d) { $('#hint').hidden = false; $('#zval').textContent = '100%'; return; }
+  if (!fresh) {
+    $('#zval').textContent = Math.round(state.scale / state.fitScale * 100) + '%';
+    if (!d.rendered) renderAll(); else ++renderToken;
+    document.scrollingElement.scrollTop = d.scrollY;
+  }
+}
+const isDirty = (d) => (d === cur ? state.undo.length : d.undo.length) !== d.savedLen;
+function renderTabs() {
+  const nav = $('#tabs'); nav.textContent = '';
+  docs.forEach((d) => {
+    const t = document.createElement('div');
+    t.className = 'btn tab'; t.setAttribute('role', 'tab'); t.tabIndex = 0;
+    t.setAttribute('aria-selected', String(d === cur)); t.title = d.name;
+    const n = document.createElement('span'); n.className = 'tname'; n.textContent = d.name.replace(/\.pdf$/i, '');
+    t.append(n);
+    if (isDirty(d)) { const dot = document.createElement('span'); dot.className = 'dirty'; dot.title = 'Nicht gespeicherte Änderungen'; t.append(dot); }
+    const x = document.createElement('button'); x.className = 'tclose'; x.textContent = '×'; x.title = 'Tab schließen';
+    x.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (isDirty(d) && !x.classList.contains('confirm')) {
+        x.classList.add('confirm'); x.textContent = 'Verwerfen?';
+        setTimeout(() => { x.classList.remove('confirm'); x.textContent = '×'; }, 3000);
+        return;
+      }
+      closeDoc(d);
+    });
+    t.append(x);
+    t.addEventListener('click', () => { if (d !== cur) activate(d); });
+    t.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (d !== cur) activate(d); } });
+    nav.append(t);
+  });
+  const add = document.createElement('label'); add.className = 'btn tabadd'; add.htmlFor = 'file'; add.textContent = '+'; add.title = 'Weiteres PDF öffnen';
+  nav.append(add);
+  const sel = nav.querySelector('[aria-selected="true"]'); if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+function closeDoc(d) {
+  const i = docs.indexOf(d); if (i < 0) return;
+  if (d === cur) { cur = null; }
+  docs.splice(i, 1); d.el.remove(); try { d.doc.destroy(); } catch {}
+  if (!cur) activate(docs[Math.min(i, docs.length - 1)] || null, false);
+  else renderTabs();
 }
 function zoom(f) {
   if (!state.doc) return;
@@ -464,7 +536,19 @@ function openTextEditor(i, p) {
 
 /* ---------- Speichern ---------- */
 function hexRgb(h) { const n = parseInt(h.slice(1), 16); return PDFLib.rgb((n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255); }
-async function save() {
+// Direkt in die geöffnete Datei speichern (Chrome/Edge am Mac/PC, z. B. im iCloud-Drive-Ordner)
+const FS = 'showOpenFilePicker' in window && window.self === window.top;
+const PDF_TYPES = [{ description: 'PDF-Dokument', accept: { 'application/pdf': ['.pdf'] } }];
+async function pickFiles() {
+  let hs; try { hs = await window.showOpenFilePicker({ multiple: true, types: PDF_TYPES, id: 'pdfstift' }); } catch { return; }
+  for (const h of hs) { const f = await h.getFile(); await openBytes(new Uint8Array(await f.arrayBuffer()), f.name, h); }
+}
+async function writeHandle(h, bytes) {
+  if (h.queryPermission && (await h.queryPermission({ mode: 'readwrite' })) !== 'granted'
+      && (await h.requestPermission({ mode: 'readwrite' })) !== 'granted') throw new Error('Kein Schreibzugriff erlaubt');
+  const w = await h.createWritable(); await w.write(bytes); await w.close();
+}
+async function save(saveAs) {
   if (!state.doc) return;
   if (editor) editor.finish();
   try {
@@ -489,23 +573,38 @@ async function save() {
       }
     }
     const bytes = await out.save();
-    const name = state.name.replace(/\.pdf$/i, '') + '-bearbeitet.pdf';
+    const name = /\.pdf$/i.test(state.name) ? state.name : state.name + '.pdf';
+    const savedDoc = cur, savedLen = state.undo.length;
+    const markSaved = () => { if (savedDoc) { savedDoc.savedLen = savedLen; updateButtons(); } };
+    if (FS && (saveAs || !cur.handle) && window.showSaveFilePicker) {
+      let h; try {
+        h = await window.showSaveFilePicker({ suggestedName: saveAs ? name.replace(/\.pdf$/i, '') + '-bearbeitet.pdf' : name, types: PDF_TYPES, id: 'pdfstift' });
+      } catch (e) { if (e.name === 'AbortError') return; throw e; }
+      await writeHandle(h, bytes);
+      savedDoc.handle = h; savedDoc.name = state.name = h.name; markSaved(); renderTabs();
+      toast(`Gespeichert in ${h.name}`); return;
+    }
+    if (FS && cur.handle) {
+      await writeHandle(cur.handle, bytes); markSaved();
+      toast(`${cur.handle.name} gespeichert`); return;
+    }
     const file = new File([bytes], name, { type: 'application/pdf' });
     if (window.claude && window.claude.use) {   // Vorschau auf claude.ai: Download über die Plattform
       const dl = await window.claude.use('downloads').catch(() => null);
       if (dl) {
-        try { await dl.save({ filename: name, data: new Blob([bytes], { type: 'application/pdf' }) }); toast(`Gespeichert als ${name}`); }
+        try { await dl.save({ filename: name, data: new Blob([bytes], { type: 'application/pdf' }) }); toast(`Gespeichert als ${name}`); markSaved(); }
         catch (e) { if (e && e.code !== 'declined') toast('Speichern ist hier gerade nicht möglich. Bitte die App-Version nutzen.', 5000); }
         return;
       }
     }
     const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     if (ios && navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
+      try { await navigator.share({ files: [file], title: name }); markSaved(); return; } catch (e) { if (e.name === 'AbortError') return; }
     }
     const url = URL.createObjectURL(file), link = document.createElement('a');
     link.href = url; link.download = name; document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
+    if (window.self === window.top) markSaved();
     toast(window.self !== window.top
       ? 'In dieser Vorschau sind Downloads gesperrt. Zum Speichern die App-Version (index.html) nutzen.'
       : `Gespeichert als ${name}`, 5000);
@@ -526,7 +625,7 @@ async function samplePdf() {
     '• Linie: gerade Linie ziehen, rastet bei 0°, 45° und 90° ein.',
     '• Begradigen: macht den zuletzt gezeichneten Strich gerade.',
     '• Text: auf die Seite tippen und schreiben. Strg/Cmd+Enter oder daneben tippen beendet.',
-    '• Speichern: lädt das PDF mit allen Änderungen herunter.'];
+    '• Speichern: schreibt das PDF mit allen Änderungen, z. B. zurück in iCloud Drive.'];
   lines.forEach((t, k) => p.drawText(t, { x: 56, y: 730 - k * 22, size: 12, font: f, color: rgb(.25, .28, .35) }));
   p.drawRectangle({ x: 56, y: 360, width: 483, height: 200, borderColor: rgb(.75, .78, .85), borderWidth: 1 });
   p.drawText('Zeichenfläche', { x: 66, y: 540, size: 10, font: f, color: rgb(.55, .58, .65) });
@@ -558,27 +657,42 @@ $('#undo').addEventListener('click', undo);
 $('#redo').addEventListener('click', redo);
 $('#zin').addEventListener('click', () => zoom(1.25));
 $('#zout').addEventListener('click', () => zoom(0.8));
-$('#save').addEventListener('click', save);
+$('#save').addEventListener('click', () => save(false));
+$('#saveas').addEventListener('click', () => save(true));
+$('#saveas').hidden = !FS;
+document.addEventListener('click', (e) => {   // „Öffnen“ und „+“ nutzen am PC/Mac den Datei-Dialog mit Schreibrecht
+  if (FS && e.target.closest('label[for="file"]')) { e.preventDefault(); pickFiles(); }
+}, true);
 $('#straighten').addEventListener('click', () => {
   const a = lastStroke(); if (!a) return;
   commit({ op: 'replace', id: a.id, before: a, after: { ...a, points: straightened(a.points) } });
 });
 $('#file').addEventListener('change', async (e) => {
-  const f = e.target.files[0]; if (!f) return;
-  await openBytes(new Uint8Array(await f.arrayBuffer()), f.name); e.target.value = '';
+  const fs = [...e.target.files]; e.target.value = '';
+  for (const f of fs) await openBytes(new Uint8Array(await f.arrayBuffer()), f.name);
 });
 ['dragover', 'dragenter'].forEach(ev => document.addEventListener(ev, (e) => { e.preventDefault(); document.body.classList.add('drop'); }));
 ['dragleave', 'drop'].forEach(ev => document.addEventListener(ev, (e) => { e.preventDefault(); document.body.classList.remove('drop'); }));
 document.addEventListener('drop', async (e) => {
-  const f = [...(e.dataTransfer?.files || [])].find(x => /pdf$/i.test(x.type) || /\.pdf$/i.test(x.name));
-  if (f) await openBytes(new Uint8Array(await f.arrayBuffer()), f.name);
+  const items = [...(e.dataTransfer?.items || [])].filter(i => i.kind === 'file');
+  const isPdf = (x) => /pdf$/i.test(x.type) || /\.pdf$/i.test(x.name);
+  if (FS && items.length && items[0].getAsFileSystemHandle) {
+    const hs = await Promise.all(items.map(i => i.getAsFileSystemHandle()));
+    for (const h of hs) if (h && h.kind === 'file') { const f = await h.getFile(); if (isPdf(f)) await openBytes(new Uint8Array(await f.arrayBuffer()), f.name, h); }
+    return;
+  }
+  const fs = [...(e.dataTransfer?.files || [])].filter(isPdf);
+  for (const f of fs) await openBytes(new Uint8Array(await f.arrayBuffer()), f.name);
 });
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('textarea, input, select')) return;
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if (mod && k === 'y') { e.preventDefault(); redo(); }
-  else if (mod && k === 's') { e.preventDefault(); save(); }
+  else if (mod && k === 's') { e.preventDefault(); save(e.shiftKey); }
+  else if (e.altKey && (k === 'arrowright' || k === 'arrowleft') && docs.length > 1) {
+    e.preventDefault(); const i = docs.indexOf(cur); activate(docs[(i + (k === 'arrowright' ? 1 : -1) + docs.length) % docs.length]);
+  }
   else if (!mod) {
     const map = { h: 'hand', p: 'pen', l: 'line', t: 'text', e: 'eraser' };
     if (map[k]) setTool(map[k]);
@@ -586,7 +700,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 let rz; window.addEventListener('resize', () => {
-  clearTimeout(rz); rz = setTimeout(() => { if (!state.doc) return; const z = state.scale / state.fitScale; fitWidth(); state.scale *= z; renderAll(); }, 250);
+  clearTimeout(rz); rz = setTimeout(() => { if (!state.doc) return; const z = state.scale / state.fitScale; fitWidth(); state.scale *= z; docs.forEach(d => { if (d !== cur) d.rendered = false; }); renderAll(); }, 250);
 });
 
 setTool('pen'); updateButtons();
