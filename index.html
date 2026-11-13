@@ -176,7 +176,7 @@ body.tool-eraser .page .ink { cursor: cell; }
 
 <main id="main">
   <div class="pages" id="pages"></div>
-  <p class="hint" id="hint">PDF öffnen oder hierher ziehen. Zeichnen mit Stift oder Linie, „Begradigen“ macht den letzten Strich gerade, mit Text tippst du auf die Stelle und schreibst los. Ein vorhandener Text lässt sich mit dem Text-Werkzeug antippen und ändern.</p>
+  <p class="hint" id="hint">PDF öffnen oder hierher ziehen. Zeichnen mit Stift oder Linie, „Begradigen“ macht den letzten Strich gerade, mit Text tippst du auf die Stelle und schreibst los. Mit dem Text-Werkzeug antippen ändert einen Text, ziehen verschiebt ihn.</p>
 </main>
 <div class="toast" id="toast" hidden></div>
 
@@ -438,14 +438,34 @@ function bindInk(ink, i) {
   ink.addEventListener('pointerdown', (e) => {
     if (e.button > 0) return;
     const p = pt(e);
-    if (state.tool === 'text') { e.preventDefault(); openTextEditor(i, p); return; }
+    if (state.tool === 'text') {
+      e.preventDefault();
+      if (editor) { editor.finish(); return; }
+      const hit = hitTest(i, p);
+      if (hit && hit.type === 'text') {   // Text antippen = bearbeiten, ziehen = verschieben
+        ink.setPointerCapture(e.pointerId);
+        cur = { move: hit, start: p, ox: hit.x, oy: hit.y, moved: false };
+        return;
+      }
+      openTextEditor(i, p); return;
+    }
     ink.setPointerCapture(e.pointerId);
     if (state.tool === 'eraser') { cur = { erase: true }; eraseAt(i, p); return; }
     if (state.tool === 'pen' || state.tool === 'line')
       cur = { type: 'stroke', page: i, color: state.color, width: state.width, points: [p], line: state.tool === 'line' };
   });
   ink.addEventListener('pointermove', (e) => {
-    if (!cur) return;
+    if (!cur) {
+      if (state.tool === 'text' && e.pointerType === 'mouse') {
+        const h = hitTest(i, pt(e)); ink.style.cursor = h && h.type === 'text' ? 'move' : '';
+      }
+      return;
+    }
+    if (cur.move) {
+      const p = pt(e), dx = p[0] - cur.start[0], dy = p[1] - cur.start[1];
+      if (!cur.moved && Math.hypot(dx, dy) * state.scale < 5) return;
+      cur.moved = true; cur.move.x = cur.ox + dx; cur.move.y = cur.oy + dy; redraw(i); return;
+    }
     if (cur.erase) { eraseAt(i, pt(e)); return; }
     if (cur.line) cur.points = [cur.points[0], snapAngle(cur.points[0], pt(e))];
     else {
@@ -457,9 +477,17 @@ function bindInk(ink, i) {
     }
     redraw(i, cur);
   });
-  const end = () => {
+  const end = (e) => {
     if (!cur) return;
     const s = cur; cur = null;
+    if (s.move) {
+      const a = s.move, nx = a.x, ny = a.y;
+      a.x = s.ox; a.y = s.oy;
+      if (s.moved && e.type !== 'pointercancel') commit({ op: 'replace', id: a.id, before: a, after: { ...a, x: nx, y: ny } });
+      else if (!s.moved) openTextEditor(i, s.start);
+      else redraw(i);
+      return;
+    }
     if (s.erase) return;
     let pts = s.points;
     if (!s.line && pts.length > 2 && $('#auto').checked && isAlmostStraight(pts)) pts = straightened(pts);
@@ -624,7 +652,7 @@ async function samplePdf() {
     '• Stift: freihand zeichnen. Fast gerade Striche werden automatisch begradigt.',
     '• Linie: gerade Linie ziehen, rastet bei 0°, 45° und 90° ein.',
     '• Begradigen: macht den zuletzt gezeichneten Strich gerade.',
-    '• Text: auf die Seite tippen und schreiben. Strg/Cmd+Enter oder daneben tippen beendet.',
+    '• Text: auf die Seite tippen und schreiben. Vorhandenen Text antippen = ändern, ziehen = verschieben.',
     '• Speichern: schreibt das PDF mit allen Änderungen, z. B. zurück in iCloud Drive.'];
   lines.forEach((t, k) => p.drawText(t, { x: 56, y: 730 - k * 22, size: 12, font: f, color: rgb(.25, .28, .35) }));
   p.drawRectangle({ x: 56, y: 360, width: 483, height: 200, borderColor: rgb(.75, .78, .85), borderWidth: 1 });

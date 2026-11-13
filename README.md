@@ -24,7 +24,7 @@ das PDF wird nirgends hochgeladen.
 | Hand | H | Scrollen, nichts zeichnen |
 | Stift | P | Freihand. Mit „Auto-gerade“ werden fast gerade Striche automatisch gerade |
 | Linie | L | Gerade Linie, rastet bei 0°, 45°, 90° ein |
-| Text | T | Auf die Seite tippen und schreiben; vorhandenen Text antippen zum Ändern |
+| Text | T | Auf die Seite tippen und schreiben; vorhandenen Text antippen = ändern, ziehen = verschieben |
 | Radierer | E | Strich oder Text antippen bzw. darüberwischen |
 | Begradigen | G | Macht den zuletzt gezeichneten Strich gerade |
 | Zurück / Wiederholen | Strg/Cmd+Z, Strg/Cmd+Umschalt+Z | |

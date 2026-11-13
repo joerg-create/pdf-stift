@@ -1,5 +1,5 @@
 // Offline-Cache für PDF Stift
-const CACHE = 'pdf-stift-v2';
+const CACHE = 'pdf-stift-v3';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon.svg',
   './lib/pdf.min.js',
   './lib/pdf.worker.min.js',
