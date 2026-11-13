@@ -68,8 +68,15 @@ jobs:
     steps:
       - name: Apple-Zugang vorhanden?
         id: check
+        env:
+          P8: ${{ secrets.APPLE_API_KEY_P8 }}
         run: |
-          if [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_DEVELOPMENT_TEAM" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "Apple-Secrets fehlen, iOS wird übersprungen."; fi
+          missing=""
+          [ -n "$APPLE_API_ISSUER" ] || missing="$missing APPLE_API_ISSUER"
+          [ -n "$APPLE_API_KEY" ] || missing="$missing APPLE_API_KEY_ID"
+          [ -n "$P8" ] || missing="$missing APPLE_API_KEY_P8"
+          [ -n "$APPLE_DEVELOPMENT_TEAM" ] || missing="$missing APPLE_TEAM_ID"
+          if [ -z "$missing" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "::warning::Fehlende Apple-Secrets:$missing (iOS wird übersprungen)"; fi
       - uses: actions/checkout@v4
         if: steps.check.outputs.ok == 'true'
       - uses: actions/setup-node@v4
